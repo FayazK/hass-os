@@ -1,8 +1,5 @@
-#!/usr/bin/env bash
-
+#!/bin/bash
 set -e
-set -u
-set -o pipefail
 
 arch=$1
 machine=$2
@@ -11,51 +8,48 @@ image_json_name=$4
 dl_dir=$5
 dst_dir=$6
 
-retry() {
-	local retries="$1"
-	local cmd=$2
+echo "Fetching container: $CONTAINER"
 
-	local output
-	output=$(eval "$cmd")
-	local rc=$?
+if [ "$CONTAINER" = "core" ]; then
+    # Use custom core image from our registry
+    REPOSITORY="doc-reg.three60.app/homeassistant/core"
+    VERSION="2025.5.0-custom"
+    echo "Using custom core image: $REPOSITORY:$VERSION"
+else
+    # Use standard images for other components
+    REPOSITORY="ghcr.io/home-assistant/${ARCH}-hassio-${CONTAINER}"
+    VERSION=$(jq -r ".$CONTAINER" "$VERSION_FILE")
+    echo "Using standard image: $REPOSITORY:$VERSION"
+fi
 
-	# shellcheck disable=SC2086
-	if [ $rc -ne 0 ] && [ $retries -gt 0 ]; then
-		echo "Retrying \"$cmd\" $retries more times..." >&2
-		sleep 3s
-		# shellcheck disable=SC2004
-		retry $(($retries - 1)) "$cmd"
-	else
-		echo "$output"
-		return $rc
-	fi
-}
+IMAGE="${REPOSITORY}:${VERSION}"
+CACHE_FILE="${CACHE_DIR}/${CONTAINER}_${VERSION}.tar"
 
-image_name=$(jq -e -r --arg image_json_name "${image_json_name}" \
-	--arg arch "${arch}" --arg machine "${machine}" \
-	'.images[$image_json_name] | sub("{arch}"; $arch) | sub("{machine}"; $machine)' \
-	< "${version_json}")
-image_tag=$(jq -e -r --arg image_json_name "${image_json_name}" \
-	'.[$image_json_name]' < "${version_json}")
-full_image_name="${image_name}:${image_tag}"
+echo "Target image: $IMAGE"
+echo "Cache file: $CACHE_FILE"
 
-image_digest=$(retry 3 "skopeo inspect 'docker://${full_image_name}' | jq -r '.Digest'")
+# Check if image exists in cache
+if [ ! -f "$CACHE_FILE" ]; then
+    echo "Cache miss - downloading $IMAGE..."
+    
+    # Login to custom registry for core image
+    if [ "$CONTAINER" = "core" ]; then
+        echo "Logging into custom registry..."
+        docker login doc-reg.three60.app
+    fi
+    
+    # Pull the image
+    docker pull "$IMAGE"
+    
+    # Save to cache
+    docker save "$IMAGE" -o "$CACHE_FILE"
+    
+    echo "Cached $IMAGE to $CACHE_FILE"
+else
+    echo "Cache hit - using cached image: $CACHE_FILE"
+fi
 
-# Cleanup image name file name use
-image_file_name="${full_image_name//[:\/]/_}@${image_digest//[:\/]/_}"
-image_file_path="${dl_dir}/${image_file_name}.tar"
-dst_image_file_path="${dst_dir}/${image_file_name}.tar"
+# Copy to output directory
+cp "$CACHE_FILE" "$OUTPUT_DIR/"
 
-(
-	# Use file locking to avoid race condition
-	flock --verbose 3
-	if [ ! -f "${image_file_path}" ]
-	then
-		echo "Fetching image: ${full_image_name} (digest ${image_digest})"
-		retry 3 "skopeo copy 'docker://${image_name}@${image_digest}' 'docker-archive:${image_file_path}:${full_image_name}'"
-	else
-		echo "Skipping download of existing image: ${full_image_name} (digest ${image_digest})"
-	fi
-
-	cp "${image_file_path}" "${dst_image_file_path}"
-) 3>"${image_file_path}.lock"
+echo "Container $CONTAINER ready in output directory"

@@ -1,0 +1,14 @@
+[Unit]
+Description=Docker Registry Authentication
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'docker login doc-reg.three60.app'
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

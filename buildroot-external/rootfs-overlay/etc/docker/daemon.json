@@ -1,12 +1,10 @@
 {
-    "storage-driver": "overlay2",
-    "log-driver": "journald",
-    "experimental": true,
-    "ip6tables": true,
-    "log-opts": {
-        "tag": "{{.Name}}"
-    },
-    "data-root": "/mnt/data/docker",
-    "deprecated-key-path": "/mnt/overlay/etc/docker/key.json",
-    "bip": "172.30.232.1/23"
+  "registry-mirrors": ["https://doc-reg.three60.app"],
+  "insecure-registries": ["doc-reg.three60.app"],
+  "data-root": "/var/lib/docker",
+  "log-driver": "journald",
+  "storage-driver": "overlay2",
+  "live-restore": true,
+  "max-concurrent-downloads": 3,
+  "max-concurrent-uploads": 3
 }
