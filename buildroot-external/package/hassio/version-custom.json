@@ -1,9 +1,9 @@
 {
-  "supervisor": "2025.05.0",
-  "dns": "2024.10.0",
-  "audio": "2024.11.1",
-  "cli": "2024.09.0",
-  "multicast": "2024.02.0",
-  "observer": "2024.02.0",
+  "supervisor": "2025.05.3",
+  "dns": "2023.06.2", 
+  "audio": "2023.10.0",
+  "cli": "2023.10.0",
+  "multicast": "2023.06.2",
+  "observer": "2023.06.0",
   "core": "doc-reg.three60.app/homeassistant/core:2025.5.0-custom"
 }
