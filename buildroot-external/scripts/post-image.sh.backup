@@ -27,11 +27,3 @@ create_disk_image
 
 # Hook post image build stuff
 hassos_post_image
-
-# Custom build verification
-echo "[CUSTOM BUILD] Running post-build verification..."
-if [ -f "${BR2_EXTERNAL_HASSOS_PATH}/package/hassio/verify-custom-build.sh" ]; then
-    "${BR2_EXTERNAL_HASSOS_PATH}/package/hassio/verify-custom-build.sh" "${BUILD_DIR}" "${BINARIES_DIR}"
-else
-    echo "[WARNING] Verification script not found"
-fi

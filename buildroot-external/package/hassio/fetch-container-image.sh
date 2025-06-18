@@ -1,13 +1,6 @@
 #!/bin/bash
 set -e
 
-# Debug: Show all arguments received
-echo "[DEBUG] fetch-container-image.sh called with $# arguments:"
-for i in $(seq 1 $#); do
-    echo "[DEBUG] Arg $i: ${!i}"
-done
-
-# Parse arguments with validation
 ARCH="$1"
 MACHINE="$2"
 VERSION_FILE="$3"
@@ -15,120 +8,132 @@ CONTAINER="$4"
 CACHE_DIR="$5"
 OUTPUT_DIR="$6"
 
-# Validate all required arguments are provided
-if [ -z "$ARCH" ] || [ -z "$MACHINE" ] || [ -z "$VERSION_FILE" ] || [ -z "$CONTAINER" ] || [ -z "$CACHE_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
-    echo "Error: Missing required arguments"
-    echo "Usage: $0 ARCH MACHINE VERSION_FILE CONTAINER CACHE_DIR OUTPUT_DIR"
-    echo "Received: ARCH='$ARCH' MACHINE='$MACHINE' VERSION_FILE='$VERSION_FILE' CONTAINER='$CONTAINER' CACHE_DIR='$CACHE_DIR' OUTPUT_DIR='$OUTPUT_DIR'"
-    exit 1
-fi
-
-# Validate version file exists
-if [ ! -f "$VERSION_FILE" ]; then
-    echo "Error: Version file does not exist: $VERSION_FILE"
-    ls -la "$(dirname "$VERSION_FILE")" || echo "Directory does not exist"
-    exit 1
-fi
-
-# Ubuntu-specific logging
-echo "[Ubuntu Build] Fetching container: $CONTAINER"
-echo "[Ubuntu Build] Architecture: $ARCH"
-echo "[Ubuntu Build] Machine: $MACHINE"
-echo "[Ubuntu Build] Version file: $VERSION_FILE"
-echo "[Ubuntu Build] Cache directory: $CACHE_DIR"
-echo "[Ubuntu Build] Output directory: $OUTPUT_DIR"
+echo "[CUSTOM BUILD] Fetching container: $CONTAINER"
+echo "[CUSTOM BUILD] Architecture: $ARCH"
+echo "[CUSTOM BUILD] Cache directory: $CACHE_DIR"
+echo "[CUSTOM BUILD] Output directory: $OUTPUT_DIR"
 
 # Ensure Docker is accessible
 if ! docker info >/dev/null 2>&1; then
-    echo "Error: Docker is not accessible. Ensure Docker daemon is running and user has permissions."
+    echo "[ERROR] Docker is not accessible. Ensure Docker daemon is running."
     exit 1
 fi
-
-# Ensure jq is available
-if ! command -v jq >/dev/null 2>&1; then
-    echo "Error: jq is not installed. Please install jq: sudo apt install jq"
-    exit 1
-fi
-
-# Debug: Show version file contents
-echo "[DEBUG] Version file contents:"
-cat "$VERSION_FILE"
 
 if [ "$CONTAINER" = "core" ]; then
     # Use custom core image from our registry
     REPOSITORY="doc-reg.three60.app/homeassistant/core"
     VERSION="2025.5.0-custom"
-    echo "[Ubuntu Build] Using custom core image: $REPOSITORY:$VERSION"
+    echo "[CUSTOM BUILD] Using custom core image: $REPOSITORY:$VERSION"
+    
+    # Log the exact command we're running
+    echo "[CUSTOM BUILD] Command: docker pull $REPOSITORY:$VERSION"
 else
     # Use standard images for other components
     REPOSITORY="ghcr.io/home-assistant/${ARCH}-hassio-${CONTAINER}"
-    
-    # Extract version using jq with proper error handling
-    VERSION=$(jq -r ".$CONTAINER" "$VERSION_FILE" 2>/dev/null)
-    if [ $? -ne 0 ] || [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
-        echo "Error: Could not extract version for $CONTAINER from $VERSION_FILE"
-        echo "Available keys in version file:"
-        jq -r 'keys[]' "$VERSION_FILE" 2>/dev/null || echo "Failed to parse JSON"
-        exit 1
-    fi
-    echo "[Ubuntu Build] Using standard image: $REPOSITORY:$VERSION"
+    VERSION=$(jq -r ".$CONTAINER" "$VERSION_FILE")
+    echo "[CUSTOM BUILD] Using standard image: $REPOSITORY:$VERSION"
 fi
 
 IMAGE="${REPOSITORY}:${VERSION}"
 CACHE_FILE="${CACHE_DIR}/${CONTAINER}_${VERSION}.tar"
 
-echo "[Ubuntu Build] Target image: $IMAGE"
-echo "[Ubuntu Build] Cache file: $CACHE_FILE"
+echo "[CUSTOM BUILD] Target image: $IMAGE"
+echo "[CUSTOM BUILD] Cache file: $CACHE_FILE"
 
-# Ensure cache directory exists with proper permissions
-mkdir -p "$CACHE_DIR"
-chmod 755 "$CACHE_DIR"
+# Ensure cache and output directories exist with proper permissions
+mkdir -p "$CACHE_DIR" "$OUTPUT_DIR"
+chmod 755 "$CACHE_DIR" "$OUTPUT_DIR"
 
 # Check if image exists in cache
 if [ ! -f "$CACHE_FILE" ]; then
-    echo "[Ubuntu Build] Cache miss - downloading $IMAGE..."
+    echo "[CUSTOM BUILD] Cache miss - downloading $IMAGE..."
     
-    # Login to custom registry for core image
+    # For custom core, try without authentication first (if registry is public)
     if [ "$CONTAINER" = "core" ]; then
-        echo "[Ubuntu Build] Logging into custom registry..."
-        if ! docker login doc-reg.three60.app; then
-            echo "Error: Failed to login to custom registry"
+        echo "[CUSTOM BUILD] Attempting to pull custom core without authentication..."
+        
+        # Try to pull without login first
+        if docker pull "$IMAGE" 2>&1 | tee /tmp/docker_pull.log; then
+            echo "[CUSTOM BUILD] Successfully pulled without authentication"
+        else
+            echo "[CUSTOM BUILD] Pull without auth failed, trying with authentication..."
+            
+            # Show the error for debugging
+            echo "[CUSTOM BUILD] Docker pull error:"
+            cat /tmp/docker_pull.log
+            
+            # Try with authentication
+            if docker login doc-reg.three60.app 2>&1; then
+                echo "[CUSTOM BUILD] Authentication successful, retrying pull..."
+                if ! docker pull "$IMAGE" 2>&1 | tee /tmp/docker_pull_auth.log; then
+                    echo "[ERROR] Failed to pull custom core even with authentication"
+                    echo "Docker error:"
+                    cat /tmp/docker_pull_auth.log
+                    exit 1
+                fi
+            else
+                echo "[ERROR] Authentication failed and no-auth pull also failed"
+                exit 1
+            fi
+        fi
+    else
+        # For standard images, pull normally
+        echo "[CUSTOM BUILD] Pulling standard image..."
+        if ! timeout 1800 docker pull "$IMAGE"; then
+            echo "[ERROR] Failed to pull standard image: $IMAGE"
             exit 1
         fi
     fi
     
-    # Pull the image with timeout
-    echo "[Ubuntu Build] Pulling image (this may take several minutes)..."
-    if ! timeout 1800 docker pull "$IMAGE"; then
-        echo "Error: Docker pull timed out or failed for image: $IMAGE"
-        
-        # For standard images, try alternative approach
-        if [ "$CONTAINER" != "core" ]; then
-            echo "Attempting to find alternative image..."
-            # List available tags if possible
-            echo "Trying to pull without specific version..."
-            docker pull "${REPOSITORY}:latest" || true
-        fi
+    # Save to cache
+    echo "[CUSTOM BUILD] Saving to cache: $CACHE_FILE"
+    if ! docker save "$IMAGE" -o "$CACHE_FILE"; then
+        echo "[ERROR] Failed to save image to cache"
         exit 1
     fi
-    
-    # Save to cache
-    echo "[Ubuntu Build] Saving to cache..."
-    docker save "$IMAGE" -o "$CACHE_FILE"
     
     # Set proper permissions
     chmod 644 "$CACHE_FILE"
     
-    echo "[Ubuntu Build] Cached $IMAGE to $CACHE_FILE"
+    # Verify cache file was created and has reasonable size
+    if [ -f "$CACHE_FILE" ]; then
+        CACHE_SIZE=$(du -h "$CACHE_FILE" | cut -f1)
+        echo "[CUSTOM BUILD] Cached $IMAGE to $CACHE_FILE (Size: $CACHE_SIZE)"
+        
+        # For core image, expect it to be large (>1GB)
+        if [ "$CONTAINER" = "core" ]; then
+            SIZE_BYTES=$(stat -f%z "$CACHE_FILE" 2>/dev/null || stat -c%s "$CACHE_FILE" 2>/dev/null || echo "0")
+            if [ "$SIZE_BYTES" -lt 1000000000 ]; then  # Less than 1GB
+                log_warning "Core image seems smaller than expected ($CACHE_SIZE)"
+            else
+                log_success "Core image cached successfully ($CACHE_SIZE)"
+            fi
+        fi
+    else
+        echo "[ERROR] Cache file was not created"
+        exit 1
+    fi
 else
-    echo "[Ubuntu Build] Cache hit - using cached image: $CACHE_FILE"
+    echo "[CUSTOM BUILD] Cache hit - using cached image: $CACHE_FILE"
+    CACHE_SIZE=$(du -h "$CACHE_FILE" | cut -f1)
+    echo "[CUSTOM BUILD] Cache size: $CACHE_SIZE"
 fi
 
-# Ensure output directory exists
-mkdir -p "$OUTPUT_DIR"
-
 # Copy to output directory
-cp "$CACHE_FILE" "$OUTPUT_DIR/"
+echo "[CUSTOM BUILD] Copying to output directory..."
+if ! cp "$CACHE_FILE" "$OUTPUT_DIR/"; then
+    echo "[ERROR] Failed to copy to output directory"
+    exit 1
+fi
 
-echo "[Ubuntu Build] Container $CONTAINER ready in output directory"
-echo "[Ubuntu Build] Output file: $OUTPUT_DIR/$(basename "$CACHE_FILE")"
+echo "[CUSTOM BUILD] Container $CONTAINER ready in output directory"
+
+# Final verification
+OUTPUT_FILE="$OUTPUT_DIR/$(basename "$CACHE_FILE")"
+if [ -f "$OUTPUT_FILE" ]; then
+    OUTPUT_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
+    echo "[CUSTOM BUILD] Final verification: $OUTPUT_FILE ($OUTPUT_SIZE)"
+else
+    echo "[ERROR] Output file not found: $OUTPUT_FILE"
+    exit 1
+fi

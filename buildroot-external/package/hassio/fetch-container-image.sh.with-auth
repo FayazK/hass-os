@@ -1,0 +1,75 @@
+#!/bin/bash
+set -e
+
+ARCH="$1"
+MACHINE="$2"
+VERSION_FILE="$3"
+CONTAINER="$4"
+CACHE_DIR="$5"
+OUTPUT_DIR="$6"
+
+echo "[Ubuntu Build] Fetching container: $CONTAINER"
+
+# Ensure Docker is accessible
+if ! docker info >/dev/null 2>&1; then
+    echo "Error: Docker is not accessible"
+    exit 1
+fi
+
+if [ "$CONTAINER" = "core" ]; then
+    # Use custom core image from our registry
+    REPOSITORY="doc-reg.three60.app/homeassistant/core"
+    VERSION="2025.5.0-custom"
+    echo "[Ubuntu Build] Using custom core image: $REPOSITORY:$VERSION"
+else
+    # Use standard images for other components
+    REPOSITORY="ghcr.io/home-assistant/${ARCH}-hassio-${CONTAINER}"
+    VERSION=$(jq -r ".$CONTAINER" "$VERSION_FILE")
+    echo "[Ubuntu Build] Using standard image: $REPOSITORY:$VERSION"
+fi
+
+IMAGE="${REPOSITORY}:${VERSION}"
+CACHE_FILE="${CACHE_DIR}/${CONTAINER}_${VERSION}.tar"
+
+echo "[Ubuntu Build] Target image: $IMAGE"
+echo "[Ubuntu Build] Cache file: $CACHE_FILE"
+
+# Ensure cache and output directories exist
+mkdir -p "$CACHE_DIR" "$OUTPUT_DIR"
+
+# Check if image exists in cache
+if [ ! -f "$CACHE_FILE" ]; then
+    echo "[Ubuntu Build] Cache miss - downloading $IMAGE..."
+    
+    # Login to custom registry for core image
+    if [ "$CONTAINER" = "core" ]; then
+        echo "[Ubuntu Build] Logging into custom registry..."
+        if ! docker login doc-reg.three60.app; then
+            echo "Error: Failed to login to custom registry"
+            exit 1
+        fi
+    fi
+    
+    # Pull the image
+    echo "[Ubuntu Build] Pulling image (this may take several minutes)..."
+    if ! timeout 1800 docker pull "$IMAGE"; then
+        echo "Error: Docker pull timed out or failed"
+        exit 1
+    fi
+    
+    # Save to cache
+    echo "[Ubuntu Build] Saving to cache..."
+    docker save "$IMAGE" -o "$CACHE_FILE"
+    
+    # Set proper permissions
+    chmod 644 "$CACHE_FILE"
+    
+    echo "[Ubuntu Build] Cached $IMAGE to $CACHE_FILE"
+else
+    echo "[Ubuntu Build] Cache hit - using cached image: $CACHE_FILE"
+fi
+
+# Copy to output directory
+cp "$CACHE_FILE" "$OUTPUT_DIR/"
+
+echo "[Ubuntu Build] Container $CONTAINER ready in output directory"

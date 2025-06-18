@@ -1,19 +1,132 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
+
 build_dir=$1
-dst_dir=$2
+dst_dir=$2  
 channel=$3
 data_img="${dst_dir}/data.ext4"
 
-# Make image
+echo "[CUSTOM BUILD] Creating data partition with custom core override..."
+
+# Make larger image to accommodate Docker images (3GB)
 rm -f "${data_img}"
-truncate --size="1280M" "${data_img}"
+truncate --size="3072M" "${data_img}"
 mkfs.ext4 -L "hassos-data" -E lazy_itable_init=0,lazy_journal_init=0 "${data_img}"
 
-echo "Created data partition image: ${data_img}"
-echo "Skipping container import due to loop device limitations in this environment"
-echo "The data partition will be populated during first boot"
+echo "[CUSTOM BUILD] Created data partition image: ${data_img} (3GB)"
 
-# Create minimal directory structure for build to continue
-mkdir -p "${build_dir}/data/"
-touch "${build_dir}/data/.placeholder"
+# Create mount point
+mount_point="${build_dir}/data_mount"
+mkdir -p "${mount_point}"
+
+# Try to mount using loop device
+if loop_device=$(losetup --find --show "${data_img}"); then
+    echo "[CUSTOM BUILD] Created loop device: ${loop_device}"
+    
+    if mount "${loop_device}" "${mount_point}"; then
+        echo "[CUSTOM BUILD] Mounted data partition for container import"
+        
+        # Create required directory structure
+        mkdir -p "${mount_point}/supervisor"
+        mkdir -p "${mount_point}/homeassistant"
+        mkdir -p "${mount_point}/docker"
+        
+        # FORCE custom core configuration
+        echo "[CUSTOM BUILD] Installing FORCED custom core configuration..."
+        cat > "${mount_point}/supervisor/version.json" << 'INNER_EOF'
+{
+  "supervisor": "2025.05.3",
+  "dns": "2023.06.2", 
+  "audio": "2023.10.0",
+  "cli": "2023.10.0",
+  "multicast": "2023.06.2",
+  "observer": "2023.06.0",
+  "core": "doc-reg.three60.app/homeassistant/core:2025.5.0-custom"
+}
+INNER_EOF
+        
+        echo "[CUSTOM BUILD] Forced version configuration installed:"
+        cat "${mount_point}/supervisor/version.json"
+        
+        # Create a supervisor override config that ONLY allows our custom core
+        cat > "${mount_point}/supervisor/core_override.json" << 'INNER_EOF'
+{
+  "core_image_override": "doc-reg.three60.app/homeassistant/core:2025.5.0-custom",
+  "disable_core_updates": true,
+  "force_custom_core": true
+}
+INNER_EOF
+        
+        echo "[CUSTOM BUILD] Created core override configuration"
+        
+        # Create Docker registry authentication
+        mkdir -p "${mount_point}/docker/config"
+        cat > "${mount_point}/docker/config/config.json" << 'INNER_EOF'
+{
+  "auths": {
+    "doc-reg.three60.app": {
+      "auth": "ZHJoYWRtaW46cGRNTGtAMkd2UGN3"
+    }
+  },
+  "credsStore": ""
+}
+INNER_EOF
+        
+        echo "[CUSTOM BUILD] Docker registry authentication configured"
+        
+        # Create a startup script that ensures our custom core is used
+        mkdir -p "${mount_point}/supervisor/startup"
+        cat > "${mount_point}/supervisor/startup/force_custom_core.sh" << 'INNER_EOF'
+#!/bin/bash
+# Force custom core startup script
+echo "[CUSTOM CORE] Forcing use of custom core image..."
+
+# Override any supervisor attempts to use default core
+export SUPERVISOR_CORE_IMAGE="doc-reg.three60.app/homeassistant/core:2025.5.0-custom"
+
+# Log what core we're using
+echo "[CUSTOM CORE] Using core image: $SUPERVISOR_CORE_IMAGE"
+
+# Ensure Docker can pull from custom registry
+docker login doc-reg.three60.app || echo "[WARNING] Docker login failed"
+
+# Pre-pull the custom core image
+echo "[CUSTOM CORE] Pre-pulling custom core image..."
+docker pull doc-reg.three60.app/homeassistant/core:2025.5.0-custom || echo "[ERROR] Failed to pre-pull custom core"
+
+echo "[CUSTOM CORE] Custom core setup completed"
+INNER_EOF
+        
+        chmod +x "${mount_point}/supervisor/startup/force_custom_core.sh"
+        
+        # Set proper permissions
+        chown -R 0:0 "${mount_point}"
+        chmod -R 755 "${mount_point}"
+        chmod 600 "${mount_point}/docker/config/config.json"
+        
+        # Show what was created
+        echo "[CUSTOM BUILD] Data partition contents:"
+        find "${mount_point}" -type f -exec ls -lh {} \;
+        
+        echo "[CUSTOM BUILD] Verification - checking for custom core references:"
+        grep -r "doc-reg.three60.app" "${mount_point}" || echo "[WARNING] No custom core references found"
+        
+        # Unmount and cleanup
+        umount "${mount_point}"
+        losetup -d "${loop_device}"
+        
+        echo "[CUSTOM BUILD] Container import setup completed successfully"
+    else
+        echo "[ERROR] Failed to mount loop device"
+        losetup -d "${loop_device}"
+        exit 1
+    fi
+else
+    echo "[ERROR] Failed to create loop device"
+    exit 1
+fi
+
+# Cleanup
+rmdir "${mount_point}" 2>/dev/null || true
+
+echo "[CUSTOM BUILD] Data partition creation completed with FORCED custom core configuration"
