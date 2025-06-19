@@ -13,10 +13,10 @@ echo "=== Creating data partition with container preloading ==="
 
 # Create 3GB data partition
 rm -f "${data_img}"
-truncate --size="3072M" "${data_img}"
+truncate --size="6144M" "${data_img}"
 mkfs.ext4 -L "hassos-data" -E lazy_itable_init=0,lazy_journal_init=0 "${data_img}"
 
-echo "Created data partition: ${data_img} (3GB)"
+echo "Created data partition: ${data_img} (6GB)"
 
 # Mount the partition
 mount_point="${build_dir}/data_mount"
