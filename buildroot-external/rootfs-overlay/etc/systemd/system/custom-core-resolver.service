@@ -1,0 +1,15 @@
+[Unit]
+Description=Custom Core Image Resolver
+After=docker.service
+Requires=docker.service
+Before=hassio-supervisor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/custom-core-resolver.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
