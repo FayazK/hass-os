@@ -156,3 +156,14 @@ fi
 rmdir "${mount_point}" 2>/dev/null || true
 
 echo "=== Container preload setup completed ==="
+
+        # Copy custom core image to data partition
+        CORE_TAR_SOURCE=$(find "${build_dir}/images" -name "core_*custom*.tar" -type f | head -1)
+        if [ -f "$CORE_TAR_SOURCE" ]; then
+            echo "Copying custom core image to data partition..."
+            cp "$CORE_TAR_SOURCE" "${mount_point}/supervisor/custom_core.tar"
+            echo "Custom core image copied: $(basename "$CORE_TAR_SOURCE")"
+        else
+            echo "Warning: Custom core TAR not found in build images"
+        fi
+

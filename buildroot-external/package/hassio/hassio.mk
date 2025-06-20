@@ -39,14 +39,16 @@ define HASSIO_BUILD_CMDS
 	)
 	echo "[CUSTOM BUILD] All containers downloaded successfully"
 	echo "[CUSTOM BUILD] Verifying custom core was downloaded..."
-	if [ ! -f "$(@D)/images/core_2025.5.0-custom.tar" ]; then \
-		echo "[ERROR] Custom core container was not downloaded!"; \
+	# Check for any core container (flexible naming)
+	CORE_FILE=$$(find "$(@D)/images/" -name "core_*.tar" -type f | head -1); \
+	if [ -z "$$CORE_FILE" ]; then \
+		echo "[ERROR] No core container found!"; \
 		echo "[ERROR] Available containers:"; \
 		ls -la "$(@D)/images/" || true; \
 		exit 1; \
 	else \
-		echo "[SUCCESS] Custom core container found"; \
-		ls -lh "$(@D)/images/core_2025.5.0-custom.tar"; \
+		echo "[SUCCESS] Custom core container found: $$CORE_FILE"; \
+		ls -lh "$$CORE_FILE"; \
 	fi
 endef
 

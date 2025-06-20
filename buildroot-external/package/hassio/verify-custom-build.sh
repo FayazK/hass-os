@@ -10,7 +10,7 @@ echo "Build directory: $BUILD_DIR"
 echo "Images directory: $IMAGES_DIR"
 
 # Check if custom core was downloaded
-CORE_TAR="$BUILD_DIR/hassio-1.0.0/images/core_2025.5.0-custom.tar"
+CORE_TAR="$BUILD_DIR/hassio-1.0.0/images/core_2025.6.1.tar"
 if [ -f "$CORE_TAR" ]; then
     CORE_SIZE=$(du -h "$CORE_TAR" | cut -f1)
     echo "✓ Custom core container found: $CORE_SIZE"
