@@ -17,26 +17,30 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 if [ "$CONTAINER" = "core" ]; then
-    # === CUSTOM CORE HANDLING ===
-    echo "[CUSTOM BUILD] Processing custom core image..."
+    # === CUSTOM CORE SUBSTITUTION ===
+    echo "[CUSTOM BUILD] Substituting custom core image..."
+    
+    # Get the expected version from version file
+    VERSION=$(jq -r ".$CONTAINER" "$VERSION_FILE")
+    echo "[CUSTOM BUILD] Expected core version: $VERSION"
     
     # Our custom image details
     CUSTOM_REPOSITORY="doc-reg.three60.app/homeassistant/core"
     CUSTOM_VERSION="2025.5.0-custom"
     CUSTOM_IMAGE="${CUSTOM_REPOSITORY}:${CUSTOM_VERSION}"
     
-    # What supervisor expects (based on machine type)
+    # What supervisor expects (this is the key!)
     EXPECTED_REPOSITORY="ghcr.io/home-assistant/${MACHINE}-homeassistant"
-    EXPECTED_VERSION="2025.6.1"  # Current stable version
-    EXPECTED_IMAGE="${EXPECTED_REPOSITORY}:${EXPECTED_VERSION}"
+    EXPECTED_IMAGE="${EXPECTED_REPOSITORY}:${VERSION}"
     
-    echo "[CUSTOM BUILD] Custom image: $CUSTOM_IMAGE"
-    echo "[CUSTOM BUILD] Supervisor expects: $EXPECTED_IMAGE"
+    echo "[CUSTOM BUILD] Our custom image: $CUSTOM_IMAGE"
+    echo "[CUSTOM BUILD] Will be presented as: $EXPECTED_IMAGE"
     
-    CACHE_FILE="${CACHE_DIR}/core_${EXPECTED_VERSION}.tar"
+    # Use the version the supervisor expects for filename
+    CACHE_FILE="${CACHE_DIR}/core_${VERSION}.tar"
     
     if [ ! -f "$CACHE_FILE" ]; then
-        echo "[CUSTOM BUILD] Preparing custom core for supervisor..."
+        echo "[CUSTOM BUILD] Creating supervisor-compatible custom core..."
         
         # Login to custom registry
         echo "[CUSTOM BUILD] Logging into custom registry..."
@@ -52,29 +56,29 @@ if [ "$CONTAINER" = "core" ]; then
             exit 1
         fi
         
-        # Tag it with what supervisor expects
-        echo "[CUSTOM BUILD] Tagging as supervisor-expected image: $EXPECTED_IMAGE"
+        # THIS IS THE KEY: Tag it with the exact name supervisor expects
+        echo "[CUSTOM BUILD] Tagging custom image as: $EXPECTED_IMAGE"
         docker tag "$CUSTOM_IMAGE" "$EXPECTED_IMAGE"
         
-        # Also tag with the standard pattern for landingpage
+        # Also create landingpage version (supervisor uses this during first boot)
         LANDINGPAGE_IMAGE="${EXPECTED_REPOSITORY}:landingpage"
         docker tag "$CUSTOM_IMAGE" "$LANDINGPAGE_IMAGE"
-        echo "[CUSTOM BUILD] Also tagged as: $LANDINGPAGE_IMAGE"
+        echo "[CUSTOM BUILD] Also tagged as landingpage: $LANDINGPAGE_IMAGE"
         
-        # Save the supervisor-expected image
-        echo "[CUSTOM BUILD] Saving supervisor-expected image to cache..."
+        # Save the image with supervisor-expected name
+        echo "[CUSTOM BUILD] Saving as expected image..."
         docker save "$EXPECTED_IMAGE" -o "$CACHE_FILE"
         
-        # Create additional cache files for different scenarios
+        # Also save landingpage version
         docker save "$LANDINGPAGE_IMAGE" -o "${CACHE_DIR}/core_landingpage.tar"
         
-        echo "[CUSTOM BUILD] Custom core prepared successfully!"
+        echo "[CUSTOM BUILD] Custom core successfully prepared for supervisor!"
     else
-        echo "[CUSTOM BUILD] Using cached supervisor-expected core image"
+        echo "[CUSTOM BUILD] Using cached custom core"
     fi
     
 else
-    # === STANDARD COMPONENT HANDLING ===
+    # === STANDARD COMPONENTS ===
     REPOSITORY="ghcr.io/home-assistant/${ARCH}-hassio-${CONTAINER}"
     VERSION=$(jq -r ".$CONTAINER" "$VERSION_FILE")
     IMAGE="${REPOSITORY}:${VERSION}"
@@ -89,6 +93,9 @@ else
             exit 1
         fi
         docker save "$IMAGE" -o "$CACHE_FILE"
+        echo "[CUSTOM BUILD] Saved: $CACHE_FILE"
+    else
+        echo "[CUSTOM BUILD] Using cached: $CACHE_FILE"
     fi
 fi
 
@@ -97,5 +104,4 @@ mkdir -p "$CACHE_DIR" "$OUTPUT_DIR"
 
 # Copy to output directory
 cp "$CACHE_FILE" "$OUTPUT_DIR/"
-
-echo "[CUSTOM BUILD] Container $CONTAINER ready in output directory"
+echo "[CUSTOM BUILD] Container $CONTAINER ready: $(basename $CACHE_FILE)"

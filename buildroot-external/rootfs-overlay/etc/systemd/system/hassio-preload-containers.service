@@ -1,0 +1,17 @@
+[Unit]
+Description=Preload Home Assistant Containers Before Supervisor
+After=docker.service systemd-resolved.service
+Requires=docker.service
+Before=hassio-supervisor.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/hassio-preload-containers.sh
+RemainAfterExit=yes
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
