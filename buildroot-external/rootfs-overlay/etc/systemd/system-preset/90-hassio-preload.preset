@@ -1,0 +1,2 @@
+# Enable Home Assistant container preload service
+enable hassio-preload-containers.service
