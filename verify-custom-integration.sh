@@ -72,8 +72,15 @@ echo "=== Checking Systemd Integration ==="
 if [ -f "buildroot-external/rootfs-overlay/etc/systemd/system/hassio-preload-containers.service" ]; then
     echo "✅ Preload service file exists"
     
-    if [ -L "buildroot-external/rootfs-overlay/etc/systemd/system/multi-user.target.wants/hassio-preload-containers.service" ]; then
+    if [ -f "buildroot-external/rootfs-overlay/etc/systemd/system/multi-user.target.wants/hassio-preload-containers.service" ]; then
         echo "✅ Service is enabled"
+        # Check if it's a proper symlink
+        LINK_TARGET=$(cat "buildroot-external/rootfs-overlay/etc/systemd/system/multi-user.target.wants/hassio-preload-containers.service" 2>/dev/null)
+        if [ "$LINK_TARGET" = "../hassio-preload-containers.service" ]; then
+            echo "✅ Service symlink is correct"
+        else
+            echo "⚠️  Service symlink may be incorrect: $LINK_TARGET"
+        fi
     else
         echo "⚠️  Service may not be enabled"
     fi
