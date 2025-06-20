@@ -109,40 +109,20 @@ EOF
             echo "Warning: Docker registry authentication not found"
         fi
         
-        # Create optimized preload script
+        # Create optimized preload script for data partition (backup)
         cat > "${mount_point}/docker/preload-containers.sh" << 'EOF'
 #!/bin/bash
+# Backup preload script (main script installed via rootfs overlay)
 set -e
 
 PRELOAD_DIR="/usr/share/hassio/docker/preload"
 LOG_FILE="/var/log/hassio-preload.log"
 
-echo "$(date): === Starting optimized container preload ===" | tee -a "$LOG_FILE"
-
-# Wait for Docker
-for i in {1..60}; do
-    if docker info >/dev/null 2>&1; then
-        echo "$(date): Docker ready" | tee -a "$LOG_FILE"
-        break
-    fi
-    sleep 2
-done
+echo "$(date): === Backup preload script running ===" | tee -a "$LOG_FILE"
 
 if [ -d "$PRELOAD_DIR" ]; then
     echo "$(date): Loading containers from $PRELOAD_DIR" | tee -a "$LOG_FILE"
     
-    # Load core container first (most important)
-    for tar_file in "$PRELOAD_DIR"/core_*.tar; do
-        if [ -f "$tar_file" ]; then
-            echo "$(date): Loading custom core..." | tee -a "$LOG_FILE"
-            if docker load < "$tar_file" 2>&1 | tee -a "$LOG_FILE"; then
-                echo "$(date): ✓ Custom core loaded successfully" | tee -a "$LOG_FILE"
-                rm -f "$tar_file"  # Remove to save space
-            fi
-        fi
-    done
-    
-    # Load other containers
     for tar_file in "$PRELOAD_DIR"/*.tar; do
         if [ -f "$tar_file" ]; then
             container_name=$(basename "$tar_file" .tar)
@@ -154,7 +134,7 @@ if [ -d "$PRELOAD_DIR" ]; then
         fi
     done
     
-    echo "$(date): All containers loaded" | tee -a "$LOG_FILE"
+    echo "$(date): Container preload completed" | tee -a "$LOG_FILE"
     docker images | tee -a "$LOG_FILE"
 else
     echo "$(date): No preload directory found" | tee -a "$LOG_FILE"

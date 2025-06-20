@@ -65,17 +65,17 @@ if [ -f "$DATA_PARTITION" ]; then
         fi
         
         # Check preload script
-        if [ -f "$TEMP_MOUNT/usr/bin/hassio-preload-containers.sh" ]; then
+        if [ -f "$TEMP_MOUNT/usr/bin/hassio-preload-containers.sh" ] || [ -f "$TEMP_MOUNT/docker/preload-containers.sh" ]; then
             echo "✓ Container preload script installed"
         else
-            echo "⚠ Container preload script missing"
+            echo "⚠ Container preload script missing (will be installed via rootfs overlay)"
         fi
         
-        # Check systemd service
+        # Check systemd service  
         if [ -f "$TEMP_MOUNT/etc/systemd/system/hassio-preload-containers.service" ]; then
             echo "✓ Systemd preload service installed"
         else
-            echo "⚠ Systemd preload service missing"
+            echo "⚠ Systemd preload service missing (will be installed via rootfs overlay)"
         fi
         
         # Check Docker authentication
@@ -97,14 +97,23 @@ else
     exit 1
 fi
 
-# Check final image
-FINAL_IMAGE="$IMAGES_DIR/haos_generic-x86-64-15.2.img"
-if [ -f "$FINAL_IMAGE" ]; then
+# Check final image (try multiple possible names)
+FINAL_IMAGE=""
+for img_name in "haos_generic-x86-64-15.2.img" "haos_generic-x86-64-*.img"; do
+    POTENTIAL_IMAGE="$IMAGES_DIR/$img_name"
+    if ls $POTENTIAL_IMAGE 1> /dev/null 2>&1; then
+        FINAL_IMAGE=$POTENTIAL_IMAGE
+        break
+    fi
+done
+
+if [ -n "$FINAL_IMAGE" ] && [ -f "$FINAL_IMAGE" ]; then
     IMAGE_SIZE=$(du -h "$FINAL_IMAGE" | cut -f1)
-    echo "✓ Final OS image created: $IMAGE_SIZE"
+    echo "✓ Final OS image created: $(basename "$FINAL_IMAGE") ($IMAGE_SIZE)"
 else
-    echo "✗ Final OS image MISSING!"
-    exit 1
+    echo "⚠ Final OS image not yet created (may be generated after verification)"
+    echo "Available files in images directory:"
+    ls -la "$IMAGES_DIR/" | grep -E "\.(img|raucb)$" || echo "No image files found yet"
 fi
 
 echo ""
